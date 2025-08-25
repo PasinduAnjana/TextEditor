@@ -1,70 +1,68 @@
 package com.example.texteditor.ui
 
-import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import com.example.texteditor.utils.FileUtils.getFileName
 import com.example.texteditor.utils.FileUtils.readTextFromUri
 import com.example.texteditor.utils.FileUtils.writeTextToUri
-import com.example.texteditor.utils.FileUtils.getFileName
 import com.example.texteditor.utils.SyntaxRules
 import com.example.texteditor.utils.AutoInsert.processAutoInsert
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.ui.platform.LocalContext
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
-    val context = LocalContext.current // Only inside @Composable
+    val context = LocalContext.current
 
-    var codeText by remember { mutableStateOf("") }
+    var codeTextState by remember { mutableStateOf(TextFieldValue("")) }
     var fileUri by remember { mutableStateOf<Uri?>(null) }
     var fileName by remember { mutableStateOf("Untitled.kt") }
     var currentLanguage by remember { mutableStateOf("kotlin") }
 
-    val undoStack = remember { mutableStateListOf<String>() }
-    val redoStack = remember { mutableStateListOf<String>() }
+    val undoStack = remember { mutableStateListOf<TextFieldValue>() }
+    val redoStack = remember { mutableStateListOf<TextFieldValue>() }
     var isUndoOrRedo by remember { mutableStateOf(false) }
 
-    val onCodeChange: (String) -> Unit = { newText ->
+    val onCodeChange: (TextFieldValue) -> Unit = { newValue ->
         if (!isUndoOrRedo) {
-            undoStack.add(codeText)
+            undoStack.add(codeTextState)
             redoStack.clear()
         }
-        codeText = newText
+        codeTextState = newValue
         isUndoOrRedo = false
     }
-
 
     fun undo() {
         if (undoStack.isNotEmpty()) {
             val previous = undoStack.removeAt(undoStack.size - 1)
-            redoStack.add(codeText)
+            redoStack.add(codeTextState)
             isUndoOrRedo = true
-            codeText = previous
+            codeTextState = previous
         }
     }
 
     fun redo() {
         if (redoStack.isNotEmpty()) {
             val next = redoStack.removeAt(redoStack.size - 1)
-            undoStack.add(codeText)
+            undoStack.add(codeTextState)
             isUndoOrRedo = true
-            codeText = next
+            codeTextState = next
         }
     }
 
@@ -74,7 +72,8 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
             uri?.let {
                 fileUri = it
                 fileName = getFileName(context, it)
-                codeText = readTextFromUri(context, it)
+                val text = readTextFromUri(context, it)
+                codeTextState = TextFieldValue(text)
 
                 val extension = fileName.substringAfterLast('.', "").lowercase()
                 currentLanguage = when (extension) {
@@ -92,7 +91,7 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
         onResult = { uri ->
             uri?.let {
                 fileUri = it
-                writeTextToUri(context, it, codeText)
+                writeTextToUri(context, it, codeTextState.text)
                 fileName = getFileName(context, it)
             }
         }
@@ -104,7 +103,7 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                 title = { Text("Text Editor") },
                 actions = {
                     IconButton(onClick = {
-                        codeText = ""
+                        codeTextState = TextFieldValue("")
                         fileUri = null
                         fileName = "Untitled.kt"
                         currentLanguage = "kotlin"
@@ -115,10 +114,9 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     }
 
                     IconButton(onClick = {
-                        if (fileUri != null) writeTextToUri(context, fileUri!!, codeText)
+                        if (fileUri != null) writeTextToUri(context, fileUri!!, codeTextState.text)
                         else saveFileLauncher.launch(fileName)
                     }) { Icon(Icons.Filled.Save, contentDescription = "Save") }
-
                 }
             )
         },
@@ -127,20 +125,27 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
-                    .imePadding()           // Moves up with keyboard
-                    .navigationBarsPadding() // Accounts for gesture/navigation bar
+                    .imePadding()
+                    .navigationBarsPadding()
             ) {
                 BottomButtonsRow(
                     onUndo = { undo() },
                     onRedo = { redo() },
                     onCompile = { /* TODO */ },
-                    onTab = { codeText += "    " }
+                    onTab = {
+                        val cursor = codeTextState.selection.start
+                        val newText = codeTextState.text.substring(0, cursor) +
+                                "    " +
+                                codeTextState.text.substring(cursor)
+                        codeTextState = codeTextState.copy(
+                            text = newText,
+                            selection = TextRange(cursor + 4)
+                        )
+                    }
                 )
 
-
-
                 StatusBarWithLanguageSelect(
-                    codeText = codeText,
+                    codeText = codeTextState.text,
                     fileName = fileName,
                     languageList = syntaxConfig.keys.toList(),
                     selectedLanguage = currentLanguage,
@@ -148,12 +153,19 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                 )
             }
         }
-
-
     ) { innerPadding ->
         EditorScreen(
-            codeText = codeText,
-            onCodeChange = { input -> onCodeChange(processAutoInsert(input, codeText)) },
+            codeTextState = codeTextState,
+            onCodeChange = { newValue: TextFieldValue ->
+                val newText: String = processAutoInsert(newValue.text, codeTextState.text) // Returns String
+                onCodeChange(
+                    TextFieldValue(
+                        text = newText,
+                        selection = newValue.selection // preserve cursor
+                    )
+                )
+            },
+
             syntaxRules = syntaxConfig[currentLanguage] ?: syntaxConfig["kotlin"]!!,
             modifier = Modifier.padding(innerPadding)
         )

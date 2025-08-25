@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
@@ -20,15 +21,15 @@ import com.example.texteditor.utils.SyntaxHighlight.highlightCode
 
 @Composable
 fun EditorScreen(
-    codeText: String,
-    onCodeChange: (String) -> Unit,
+    codeTextState: TextFieldValue,
+    onCodeChange: (TextFieldValue) -> Unit,
     syntaxRules: SyntaxRules,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
 
     BasicTextField(
-        value = codeText,
+        value = codeTextState,
         onValueChange = onCodeChange,
         textStyle = TextStyle(
             fontFamily = FontFamily.Monospace,
@@ -42,7 +43,6 @@ fun EditorScreen(
             .verticalScroll(scrollState),
         visualTransformation = object : VisualTransformation {
             override fun filter(text: androidx.compose.ui.text.AnnotatedString): TransformedText {
-                // Wrap the highlighted code in a TransformedText
                 return TransformedText(highlightCode(text.text, syntaxRules), OffsetMapping.Identity)
             }
         }

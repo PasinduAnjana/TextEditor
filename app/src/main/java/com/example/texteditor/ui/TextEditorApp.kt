@@ -6,10 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,11 +18,11 @@ import com.example.texteditor.utils.FileUtils.writeTextToUri
 import com.example.texteditor.utils.FileUtils.getFileName
 import com.example.texteditor.utils.SyntaxRules
 import com.example.texteditor.utils.AutoInsert.processAutoInsert
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.Icons
 import androidx.compose.ui.platform.LocalContext
 
 
@@ -110,7 +108,7 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                         fileUri = null
                         fileName = "Untitled.kt"
                         currentLanguage = "kotlin"
-                    }) { Icon(Icons.Filled.NoteAdd, contentDescription = "New") }
+                    }) { Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = "New") }
 
                     IconButton(onClick = { openFileLauncher.launch(arrayOf("*/*")) }) {
                         Icon(Icons.Filled.FolderOpen, contentDescription = "Open")

@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
 import com.example.texteditor.models.CompileError
 import com.example.texteditor.models.CompileResponse
 import com.example.texteditor.network.CompilerApi
@@ -48,6 +49,9 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
     val scope = rememberCoroutineScope()
     var compileResult by remember { mutableStateOf<CompileResponse?>(null) }
     var showCompileDialog by remember { mutableStateOf(false) }
+
+    var isCompiling by remember { mutableStateOf(false) }
+
 
     val onCodeChange: (TextFieldValue) -> Unit = { newValue ->
         if (!isUndoOrRedo) {
@@ -172,6 +176,16 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     .imePadding()
                     .navigationBarsPadding()
             ) {
+                if (isCompiling) {
+                    Text(
+                        "⏳ Compiling...",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(0.2f))
+                            .padding(8.dp)
+                    )
+                }
+
                 if (showFindReplace) {
                     FindReplaceBar(
                         query = searchQuery,
@@ -200,25 +214,27 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     onCompile = {
                         scope.launch {
                             try {
+                                isCompiling = true // Show "Compiling..." immediately
+
                                 val codeFile = File(context.getExternalFilesDir(null), "tmp_code.kt")
                                 codeFile.writeText(codeTextState.text)
 
-                                // Wait for fresh compilation output
                                 val result = CompilerApi.compileKotlinAuto(context)
 
                                 compileResult = result
-                                showCompileDialog = true
-
                             } catch (e: Exception) {
                                 compileResult = CompileResponse(
                                     success = false,
                                     errors = listOf(CompileError(0, 0, e.message ?: "Unknown error")),
                                     output = ""
                                 )
-                                showCompileDialog = true
+                            } finally {
+                                isCompiling = false
+                                showCompileDialog = true // Show dialog after compilation
                             }
                         }
                     }
+
 
 
 
@@ -260,7 +276,7 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                         } else {
                             append("❌ Compilation Failed\n")
                             res.errors.forEach { err ->
-                                append("\nLine ${err.line}, Col ${err.column}: ${err.message}")
+                                appendLine("Line ${err.line}, Col ${err.column}: ${err.message}")
                             }
                         }
                     }

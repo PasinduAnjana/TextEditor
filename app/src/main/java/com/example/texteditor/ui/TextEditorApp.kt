@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -38,6 +39,11 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
     val undoStack = remember { mutableStateListOf<TextFieldValue>() }
     val redoStack = remember { mutableStateListOf<TextFieldValue>() }
     var isUndoOrRedo by remember { mutableStateOf(false) }
+
+    var showFindReplace by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var replaceText by remember { mutableStateOf("") }
+
 
     val onCodeChange: (TextFieldValue) -> Unit = { newValue ->
         if (!isUndoOrRedo) {
@@ -65,6 +71,37 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
             codeTextState = next
         }
     }
+
+    fun findNext() {
+        if (searchQuery.isNotEmpty()) {
+            val startIndex = codeTextState.selection.end
+            val index = codeTextState.text.indexOf(searchQuery, startIndex, ignoreCase = true)
+                .takeIf { it >= 0 }
+                ?: codeTextState.text.indexOf(searchQuery, ignoreCase = true) // wrap around
+
+            if (index >= 0) {
+                codeTextState = codeTextState.copy(
+                    selection = TextRange(index, index + searchQuery.length)
+                )
+            }
+        }
+    }
+
+    fun replaceCurrent() {
+        val sel = codeTextState.selection
+        if (sel.start < sel.end) {
+            val before = codeTextState.text.substring(0, sel.start)
+            val after = codeTextState.text.substring(sel.end)
+            val newText = before + replaceText + after
+            codeTextState = TextFieldValue(
+                text = newText,
+                selection = TextRange(sel.start + replaceText.length)
+            )
+        } else {
+            findNext() // if no selection, just find
+        }
+    }
+
 
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -117,6 +154,11 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                         if (fileUri != null) writeTextToUri(context, fileUri!!, codeTextState.text)
                         else saveFileLauncher.launch(fileName)
                     }) { Icon(Icons.Filled.Save, contentDescription = "Save") }
+
+                    IconButton(onClick = { showFindReplace = !showFindReplace }) {
+                        Icon(Icons.Default.Search, contentDescription = "Find & Replace")
+                    }
+
                 }
             )
         },
@@ -128,6 +170,17 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     .imePadding()
                     .navigationBarsPadding()
             ) {
+                if (showFindReplace) {
+                    FindReplaceBar(
+                        query = searchQuery,
+                        replaceText = replaceText,
+                        onQueryChange = { searchQuery = it },
+                        onReplaceTextChange = { replaceText = it },
+                        onFindNext = { findNext() },
+                        onReplace = { replaceCurrent() },
+                        onClose = { showFindReplace = false }
+                    )
+                }
                 BottomButtonsRow(
                     onUndo = { undo() },
                     onRedo = { redo() },

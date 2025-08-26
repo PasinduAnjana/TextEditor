@@ -95,3 +95,47 @@ fun StatusBarWithLanguageSelect(
         }
     }
 }
+
+
+@Composable
+fun FindReplaceBar(
+    query: String,
+    replaceText: String,
+    onQueryChange: (String) -> Unit,
+    onReplaceTextChange: (String) -> Unit,
+    onFindNext: () -> Unit,
+    onReplace: () -> Unit,
+    onClose: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(8.dp,1.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            label = { Text("Find") },
+            modifier = Modifier.weight(1f).padding(end = 4.dp),
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = replaceText,
+            onValueChange = onReplaceTextChange,
+            label = { Text("Replace") },
+            modifier = Modifier.weight(1f).padding(end = 4.dp),
+            singleLine = true
+        )
+        IconButton(onClick = onFindNext) {
+            Icon(Icons.Default.Search, contentDescription = "Find Next")
+        }
+        IconButton(onClick = onReplace) {
+            Icon(Icons.Default.Refresh, contentDescription = "Replace")
+        }
+        IconButton(onClick = onClose) {
+            Icon(Icons.Default.Close, contentDescription = "Close")
+        }
+    }
+}

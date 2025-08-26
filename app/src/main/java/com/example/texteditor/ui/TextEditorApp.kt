@@ -4,11 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.FolderOpen
@@ -20,11 +16,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import com.example.texteditor.models.CompileError
+import com.example.texteditor.models.CompileResponse
+import com.example.texteditor.network.CompilerApi
 import com.example.texteditor.utils.FileUtils.getFileName
 import com.example.texteditor.utils.FileUtils.readTextFromUri
 import com.example.texteditor.utils.FileUtils.writeTextToUri
 import com.example.texteditor.utils.SyntaxRules
 import com.example.texteditor.utils.AutoInsert.processAutoInsert
+import kotlinx.coroutines.launch
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +45,9 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
     var searchQuery by remember { mutableStateOf("") }
     var replaceText by remember { mutableStateOf("") }
 
+    val scope = rememberCoroutineScope()
+    var compileResult by remember { mutableStateOf<CompileResponse?>(null) }
+    var showCompileDialog by remember { mutableStateOf(false) }
 
     val onCodeChange: (TextFieldValue) -> Unit = { newValue ->
         if (!isUndoOrRedo) {
@@ -98,10 +102,9 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                 selection = TextRange(sel.start + replaceText.length)
             )
         } else {
-            findNext() // if no selection, just find
+            findNext()
         }
     }
-
 
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -158,7 +161,6 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     IconButton(onClick = { showFindReplace = !showFindReplace }) {
                         Icon(Icons.Default.Search, contentDescription = "Find & Replace")
                     }
-
                 }
             )
         },
@@ -181,10 +183,10 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                         onClose = { showFindReplace = false }
                     )
                 }
+
                 BottomButtonsRow(
                     onUndo = { undo() },
                     onRedo = { redo() },
-                    onCompile = { /* TODO */ },
                     onTab = {
                         val cursor = codeTextState.selection.start
                         val newText = codeTextState.text.substring(0, cursor) +
@@ -194,7 +196,32 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                             text = newText,
                             selection = TextRange(cursor + 4)
                         )
+                    },
+                    onCompile = {
+                        scope.launch {
+                            try {
+                                val codeFile = File(context.getExternalFilesDir(null), "tmp_code.kt")
+                                codeFile.writeText(codeTextState.text)
+
+                                // Wait for fresh compilation output
+                                val result = CompilerApi.compileKotlinAuto(context)
+
+                                compileResult = result
+                                showCompileDialog = true
+
+                            } catch (e: Exception) {
+                                compileResult = CompileResponse(
+                                    success = false,
+                                    errors = listOf(CompileError(0, 0, e.message ?: "Unknown error")),
+                                    output = ""
+                                )
+                                showCompileDialog = true
+                            }
+                        }
                     }
+
+
+
                 )
 
                 StatusBarWithLanguageSelect(
@@ -209,18 +236,42 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
     ) { innerPadding ->
         EditorScreen(
             codeTextState = codeTextState,
-            onCodeChange = { newValue: TextFieldValue ->
-                val newText: String = processAutoInsert(newValue.text, codeTextState.text) // Returns String
-                onCodeChange(
-                    TextFieldValue(
-                        text = newText,
-                        selection = newValue.selection // preserve cursor
-                    )
-                )
+            onCodeChange = { newValue ->
+                val newText = processAutoInsert(newValue.text, codeTextState.text)
+                onCodeChange(TextFieldValue(text = newText, selection = newValue.selection))
             },
-
             syntaxRules = syntaxConfig[currentLanguage] ?: syntaxConfig["kotlin"]!!,
             modifier = Modifier.padding(innerPadding)
+        )
+    }
+
+    if (showCompileDialog) {
+        AlertDialog(
+            onDismissRequest = { showCompileDialog = false },
+            title = { Text("Compilation Result") },
+            text = {
+                val message = compileResult?.let { res ->
+                    buildString {
+                        if (res.success) {
+                            append("✅ Compilation Successful\n")
+                            if (!res.output.isNullOrEmpty()) {
+                                append("\nOutput:\n${res.output}")
+                            }
+                        } else {
+                            append("❌ Compilation Failed\n")
+                            res.errors.forEach { err ->
+                                append("\nLine ${err.line}, Col ${err.column}: ${err.message}")
+                            }
+                        }
+                    }
+                } ?: "Unknown error"
+                Text(message)
+            },
+            confirmButton = {
+                TextButton(onClick = { showCompileDialog = false }) {
+                    Text("OK")
+                }
+            }
         )
     }
 }

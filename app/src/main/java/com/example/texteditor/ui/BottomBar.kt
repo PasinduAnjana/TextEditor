@@ -101,41 +101,68 @@ fun StatusBarWithLanguageSelect(
 fun FindReplaceBar(
     query: String,
     replaceText: String,
+    caseSensitive: Boolean,
     onQueryChange: (String) -> Unit,
     onReplaceTextChange: (String) -> Unit,
+    onCaseSensitiveChange: (Boolean) -> Unit,
     onFindNext: () -> Unit,
     onReplace: () -> Unit,
     onClose: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
-            .padding(8.dp,1.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(8.dp)
     ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            label = { Text("Find") },
-            modifier = Modifier.weight(1f).padding(end = 4.dp),
-            singleLine = true
-        )
-        OutlinedTextField(
-            value = replaceText,
-            onValueChange = onReplaceTextChange,
-            label = { Text("Replace") },
-            modifier = Modifier.weight(1f).padding(end = 4.dp),
-            singleLine = true
-        )
-        IconButton(onClick = onFindNext) {
-            Icon(Icons.Default.Search, contentDescription = "Find Next")
+        // First row: Find and Replace text fields
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                label = { Text("Find") },
+                modifier = Modifier
+                    .weight(0.6f)
+                    .padding(end = 4.dp),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = replaceText,
+                onValueChange = onReplaceTextChange,
+                label = { Text("Replace") },
+                modifier = Modifier
+                    .weight(0.4f)
+                    .padding(start = 4.dp),
+                singleLine = true
+            )
         }
-        IconButton(onClick = onReplace) {
-            Icon(Icons.Default.Refresh, contentDescription = "Replace")
-        }
-        IconButton(onClick = onClose) {
-            Icon(Icons.Default.Close, contentDescription = "Close")
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Second row: Case-sensitive checkbox and buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 16.dp)
+            ) {
+                Checkbox(
+                    checked = caseSensitive,
+                    onCheckedChange = onCaseSensitiveChange
+                )
+                Text("Case Sensitive", fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            IconButton(onClick = onFindNext) { Icon(Icons.Default.Search, contentDescription = "Find Next") }
+            IconButton(onClick = onReplace) { Icon(Icons.Default.Refresh, contentDescription = "Replace") }
+            IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = "Close") }
         }
     }
 }

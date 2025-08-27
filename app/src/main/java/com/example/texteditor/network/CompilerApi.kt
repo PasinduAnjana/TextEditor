@@ -12,90 +12,83 @@ object CompilerApi {
 
     private val errorRegex = Regex("""(.+\.kt):(\d+):(\d+):.*error: (.+)""")
 
-    // Helper to remove ANSI color codes from compiler output
-    private fun String.removeAnsiColors(): String {
-        return this.replace(Regex("""\u001B\[[;?\d]*[A-Za-z]"""), "")
-    }
+    private fun String.removeAnsiColors(): String =
+        this.replace(Regex("""\u001B\[[;?\d]*[A-Za-z]"""), "")
 
-    /**
-     * Compile Kotlin code automatically by waiting for fresh output from PC-side auto compiler.
-     */
-    suspend fun compileKotlinAuto(context: Context, timeoutMs: Long = 10000L): CompileResponse =
+    private suspend fun compileGeneric(context: Context, timeoutMs: Long): CompileResponse =
         withContext(Dispatchers.IO) {
             try {
                 val outputFile = File(context.getExternalFilesDir(null), "compile_output.txt")
-
-                // Delete old output for fresh compile
                 if (outputFile.exists()) outputFile.delete()
 
                 val pollInterval = 100L
                 var waited = 0L
-
                 while (!outputFile.exists() && waited < timeoutMs) {
                     Thread.sleep(pollInterval)
                     waited += pollInterval
                 }
 
                 if (!outputFile.exists()) {
-                    return@withContext CompileResponse(
-                        success = false,
-                        errors = listOf(
-                            CompileError(
-                                0,
-                                0,
-                                "Compilation output not found. Make sure PC auto compiler is running."
-                            )
-                        ),
-                        output = ""
-                    )
+                    return@withContext CompileResponse(false,
+                        listOf(CompileError(0,0,"Compilation output not found. Ensure PC compiler is running.")),
+                        "")
                 }
 
                 val lines = outputFile.readLines()
                 val flag = lines.firstOrNull()
                 val isCompileError = flag == "COMPILE_ERROR"
-                val errors = mutableListOf<CompileError>()
                 val outputText = lines.drop(1).joinToString("\n").removeAnsiColors()
+
+                CompileResponse(
+                    success = !isCompileError,
+                    errors = if (isCompileError) listOf(CompileError(0,0,outputText)) else emptyList(),
+                    output = if (!isCompileError) outputText else ""
+                )
+            } catch (e: Exception) {
+                CompileResponse(false, listOf(CompileError(0,0,e.localizedMessage ?: "Unknown error")), "")
+            }
+        }
+
+    suspend fun compilePythonAuto(context: Context, timeoutMs: Long = 10000L) = compileGeneric(context, timeoutMs)
+    suspend fun compileCAuto(context: Context, timeoutMs: Long = 10000L) = compileGeneric(context, timeoutMs)
+
+    suspend fun compileKotlinAuto(context: Context, timeoutMs: Long = 10000L): CompileResponse =
+        withContext(Dispatchers.IO) {
+            try {
+                val outputFile = File(context.getExternalFilesDir(null), "compile_output.txt")
+                if (outputFile.exists()) outputFile.delete()
+
+                val pollInterval = 100L
+                var waited = 0L
+                while (!outputFile.exists() && waited < timeoutMs) {
+                    Thread.sleep(pollInterval)
+                    waited += pollInterval
+                }
+
+                if (!outputFile.exists()) {
+                    return@withContext CompileResponse(false,
+                        listOf(CompileError(0,0,"Compilation output not found. Ensure PC compiler is running.")), "")
+                }
+
+                val lines = outputFile.readLines()
+                val flag = lines.firstOrNull()
+                val isCompileError = flag == "COMPILE_ERROR"
+                val outputText = lines.drop(1).joinToString("\n").removeAnsiColors()
+                val errors = mutableListOf<CompileError>()
 
                 if (isCompileError) {
                     lines.drop(1).forEach { line ->
-                        val cleanLine = line.removeAnsiColors()
-
-                        // Skip JVM warnings
-                        if (cleanLine.startsWith("WARNING:")) return@forEach
-
-                        val match = errorRegex.matchEntire(cleanLine)
-                        if (match != null) {
-                            val (_, lineNum, colNum, msg) = match.destructured
-                            errors.add(
-                                CompileError(
-                                    lineNum.toInt(),
-                                    colNum.toInt(),
-                                    msg
-                                )
-                            )
+                        val clean = line.removeAnsiColors()
+                        if (clean.startsWith("WARNING:")) return@forEach
+                        errorRegex.matchEntire(clean)?.destructured?.let { (_, l, c, msg) ->
+                            errors.add(CompileError(l.toInt(), c.toInt(), msg))
                         }
                     }
                 }
 
-                CompileResponse(
-                    success = !isCompileError,
-                    errors = errors,
-                    output = if (!isCompileError) outputText else ""
-                )
-
+                CompileResponse(success = !isCompileError, errors = errors, output = if (!isCompileError) outputText else "")
             } catch (e: Exception) {
-                Log.e("CompilerApi", "Error reading compilation output", e)
-                CompileResponse(
-                    success = false,
-                    errors = listOf(
-                        CompileError(
-                            0,
-                            0,
-                            e.localizedMessage ?: "Unknown error"
-                        )
-                    ),
-                    output = ""
-                )
+                CompileResponse(false, listOf(CompileError(0,0,e.localizedMessage ?: "Unknown error")), "")
             }
         }
 }

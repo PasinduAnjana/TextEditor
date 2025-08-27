@@ -1,15 +1,16 @@
 package com.example.texteditor.ui
 
+import android.content.Context
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -27,71 +28,88 @@ import com.example.texteditor.utils.SyntaxRules
 import com.example.texteditor.utils.AutoInsert.processAutoInsert
 import kotlinx.coroutines.launch
 import java.io.File
+import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
+fun TextEditorApp(initialSyntaxConfig: Map<String, SyntaxRules>) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
+    // ---------------- States ----------------
     var codeTextState by remember { mutableStateOf(TextFieldValue("")) }
     var fileUri by remember { mutableStateOf<Uri?>(null) }
     var fileName by remember { mutableStateOf("Untitled.kt") }
     var currentLanguage by remember { mutableStateOf("kotlin") }
 
-    val undoStack = remember { mutableStateListOf<TextFieldValue>() }
-    val redoStack = remember { mutableStateListOf<TextFieldValue>() }
+    var undoStack = remember { mutableStateListOf<TextFieldValue>() }
+    var redoStack = remember { mutableStateListOf<TextFieldValue>() }
     var isUndoOrRedo by remember { mutableStateOf(false) }
 
     var showFindReplace by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var replaceText by remember { mutableStateOf("") }
+    var caseSensitive by remember { mutableStateOf(false) }
 
-    val scope = rememberCoroutineScope()
     var compileResult by remember { mutableStateOf<CompileResponse?>(null) }
     var showCompileDialog by remember { mutableStateOf(false) }
-
     var isCompiling by remember { mutableStateOf(false) }
 
+    var showAddLanguageDialog by remember { mutableStateOf(false) }
+    var showRemoveLanguageDialog by remember { mutableStateOf(false) }
 
+    var languages by remember { mutableStateOf(initialSyntaxConfig.toMutableMap()) }
+    var showMenu by remember { mutableStateOf(false) }
+
+    var isLoadingFile by remember { mutableStateOf(false) } // <-- prevents auto-insert on load
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // ---------------- Undo / Redo ----------------
     val onCodeChange: (TextFieldValue) -> Unit = { newValue ->
-        if (!isUndoOrRedo) {
+        if (!isUndoOrRedo && !isLoadingFile) {
             undoStack.add(codeTextState)
             redoStack.clear()
+            val newText = processAutoInsert(newValue.text, codeTextState.text)
+            codeTextState = TextFieldValue(text = newText, selection = newValue.selection)
+        } else {
+            codeTextState = newValue
+            isUndoOrRedo = false
+            isLoadingFile = false
         }
-        codeTextState = newValue
-        isUndoOrRedo = false
     }
 
+    @RequiresApi(Build.VERSION_CODES.N)
     fun undo() {
         if (undoStack.isNotEmpty()) {
-            val previous = undoStack.removeAt(undoStack.size - 1)
+            val prev = undoStack.removeLast()
             redoStack.add(codeTextState)
             isUndoOrRedo = true
-            codeTextState = previous
+            codeTextState = prev
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.N)
     fun redo() {
         if (redoStack.isNotEmpty()) {
-            val next = redoStack.removeAt(redoStack.size - 1)
+            val next = redoStack.removeLast()
             undoStack.add(codeTextState)
             isUndoOrRedo = true
             codeTextState = next
         }
     }
 
+    // ---------------- Find / Replace ----------------
     fun findNext() {
-        if (searchQuery.isNotEmpty()) {
-            val startIndex = codeTextState.selection.end
-            val index = codeTextState.text.indexOf(searchQuery, startIndex, ignoreCase = true)
-                .takeIf { it >= 0 }
-                ?: codeTextState.text.indexOf(searchQuery, ignoreCase = true) // wrap around
-
-            if (index >= 0) {
-                codeTextState = codeTextState.copy(
-                    selection = TextRange(index, index + searchQuery.length)
-                )
-            }
+        if (searchQuery.isEmpty()) return
+        val startIndex = codeTextState.selection.end
+        val textToSearch = if (caseSensitive) codeTextState.text else codeTextState.text.lowercase()
+        val queryToSearch = if (caseSensitive) searchQuery else searchQuery.lowercase()
+        val index = textToSearch.indexOf(queryToSearch, startIndex).takeIf { it >= 0 }
+            ?: textToSearch.indexOf(queryToSearch) // wrap around
+        if (index >= 0) {
+            codeTextState = codeTextState.copy(
+                selection = TextRange(index, index + searchQuery.length)
+            )
         }
     }
 
@@ -110,6 +128,23 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
         }
     }
 
+    fun saveTextToFile(context: Context, uri: Uri?, text: String) {
+        if (uri == null) return
+
+        try {
+            context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                output.write(text.toByteArray())
+                output.flush()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            throw e
+        }
+    }
+
+
+
+    // ---------------- File Launchers ----------------
     val openFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
@@ -117,13 +152,15 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                 fileUri = it
                 fileName = getFileName(context, it)
                 val text = readTextFromUri(context, it)
+                isLoadingFile = true // disable auto-insert when loading
                 codeTextState = TextFieldValue(text)
 
-                val extension = fileName.substringAfterLast('.', "").lowercase()
-                currentLanguage = when (extension) {
+                val ext = fileName.substringAfterLast('.', "").lowercase()
+                currentLanguage = when (ext) {
                     "kt" -> "kotlin"
                     "java" -> "java"
                     "py" -> "python"
+                    "c" -> "c"
                     else -> "kotlin"
                 }
             }
@@ -137,11 +174,30 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                 fileUri = it
                 writeTextToUri(context, it, codeTextState.text)
                 fileName = getFileName(context, it)
+                scope.launch { snackbarHostState.showSnackbar("💾 File saved as $fileName") }
             }
         }
     )
 
+
+    // ---------------- JSON Language Launcher ----------------
+    val addLanguageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            uri?.let {
+                val jsonText = readTextFromUri(context, it)
+                parseSyntaxJson(jsonText)?.let { (name, rules) ->
+                    languages[name] = rules
+                    context.openFileOutput("$name.json", 0).use { it.write(jsonText.toByteArray()) }
+                    scope.launch { snackbarHostState.showSnackbar("✅ Language '$name' added") }
+                }
+            }
+        }
+    )
+
+    // ---------------- UI ----------------
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Text Editor") },
@@ -158,12 +214,53 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     }
 
                     IconButton(onClick = {
-                        if (fileUri != null) writeTextToUri(context, fileUri!!, codeTextState.text)
-                        else saveFileLauncher.launch(fileName)
+                        if (fileUri != null) {
+                            try {
+                                saveTextToFile(context, fileUri, codeTextState.text)
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("💾 File saved as $fileName")
+                                }
+                            } catch (e: Exception) {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("⚠️ Error saving file: ${e.message}")
+                                }
+                            }
+                        } else {
+                            saveFileLauncher.launch(fileName)
+                        }
                     }) { Icon(Icons.Filled.Save, contentDescription = "Save") }
+
+
 
                     IconButton(onClick = { showFindReplace = !showFindReplace }) {
                         Icon(Icons.Default.Search, contentDescription = "Find & Replace")
+                    }
+
+                    // Overflow menu
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                        }
+
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Add Language") },
+                                onClick = {
+                                    showMenu = false
+                                    showAddLanguageDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Remove Language") },
+                                onClick = {
+                                    showMenu = false
+                                    showRemoveLanguageDialog = true
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -190,8 +287,10 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     FindReplaceBar(
                         query = searchQuery,
                         replaceText = replaceText,
+                        caseSensitive = caseSensitive,
                         onQueryChange = { searchQuery = it },
                         onReplaceTextChange = { replaceText = it },
+                        onCaseSensitiveChange = { caseSensitive = it },
                         onFindNext = { findNext() },
                         onReplace = { replaceCurrent() },
                         onClose = { showFindReplace = false }
@@ -203,8 +302,7 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                     onRedo = { redo() },
                     onTab = {
                         val cursor = codeTextState.selection.start
-                        val newText = codeTextState.text.substring(0, cursor) +
-                                "    " +
+                        val newText = codeTextState.text.substring(0, cursor) + "    " +
                                 codeTextState.text.substring(cursor)
                         codeTextState = codeTextState.copy(
                             text = newText,
@@ -212,38 +310,39 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
                         )
                     },
                     onCompile = {
+                        if (fileUri == null) {
+                            compileResult = CompileResponse(false, listOf(CompileError(0,0,"Please save before compiling")), "")
+                            showCompileDialog = true
+                            return@BottomButtonsRow
+                        }
                         scope.launch {
                             try {
-                                isCompiling = true // Show "Compiling..." immediately
+                                isCompiling = true
+                                val ext = fileName.substringAfterLast('.', "").lowercase()
+                                val dir = context.getExternalFilesDir(null)
+                                val tmpFile = File(dir, "tmp_code_${System.currentTimeMillis()}.$ext")
+                                tmpFile.writeText(codeTextState.text)
 
-                                val codeFile = File(context.getExternalFilesDir(null), "tmp_code.kt")
-                                codeFile.writeText(codeTextState.text)
-
-                                val result = CompilerApi.compileKotlinAuto(context)
-
-                                compileResult = result
+                                compileResult = when (ext) {
+                                    "kt" -> CompilerApi.compileKotlinAuto(context)
+                                    "py" -> CompilerApi.compilePythonAuto(context)
+                                    "c" -> CompilerApi.compileCAuto(context)
+                                    else -> CompileResponse(false, listOf(CompileError(0,0,"Unsupported file type")), "")
+                                }
                             } catch (e: Exception) {
-                                compileResult = CompileResponse(
-                                    success = false,
-                                    errors = listOf(CompileError(0, 0, e.message ?: "Unknown error")),
-                                    output = ""
-                                )
+                                compileResult = CompileResponse(false, listOf(CompileError(0,0,e.message ?: "Unknown error")), "")
                             } finally {
                                 isCompiling = false
-                                showCompileDialog = true // Show dialog after compilation
+                                showCompileDialog = true
                             }
                         }
                     }
-
-
-
-
                 )
 
                 StatusBarWithLanguageSelect(
                     codeText = codeTextState.text,
                     fileName = fileName,
-                    languageList = syntaxConfig.keys.toList(),
+                    languageList = languages.keys.toList(),
                     selectedLanguage = currentLanguage,
                     onLanguageChange = { currentLanguage = it }
                 )
@@ -252,42 +351,91 @@ fun TextEditorApp(syntaxConfig: Map<String, SyntaxRules>) {
     ) { innerPadding ->
         EditorScreen(
             codeTextState = codeTextState,
-            onCodeChange = { newValue ->
-                val newText = processAutoInsert(newValue.text, codeTextState.text)
-                onCodeChange(TextFieldValue(text = newText, selection = newValue.selection))
-            },
-            syntaxRules = syntaxConfig[currentLanguage] ?: syntaxConfig["kotlin"]!!,
+            onCodeChange = onCodeChange,
+            syntaxRules = languages[currentLanguage] ?: languages["kotlin"]!!,
             modifier = Modifier.padding(innerPadding)
         )
     }
 
+    // Compile dialog
     if (showCompileDialog) {
         AlertDialog(
             onDismissRequest = { showCompileDialog = false },
             title = { Text("Compilation Result") },
             text = {
-                val message = compileResult?.let { res ->
+                val msg = compileResult?.let { res ->
                     buildString {
-                        if (res.success) {
-                            append("✅ Compilation Successful\n")
-                            if (!res.output.isNullOrEmpty()) {
-                                append("\nOutput:\n${res.output}")
-                            }
-                        } else {
-                            append("❌ Compilation Failed\n")
-                            res.errors.forEach { err ->
-                                appendLine("Line ${err.line}, Col ${err.column}: ${err.message}")
-                            }
+                        if (res.success) append("✅ Compilation Successful\n")
+                        else append("❌ Compilation Failed\n")
+                        res.errors.forEach { e ->
+                            appendLine("Line ${e.line}, Col ${e.column}: ${e.message}")
                         }
+                        if (!res.output.isNullOrEmpty()) appendLine("\nOutput:\n${res.output}")
                     }
                 } ?: "Unknown error"
-                Text(message)
+                Text(msg)
             },
             confirmButton = {
-                TextButton(onClick = { showCompileDialog = false }) {
-                    Text("OK")
-                }
+                TextButton(onClick = { showCompileDialog = false }) { Text("OK") }
             }
         )
+    }
+
+    // Add language dialog
+    if (showAddLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddLanguageDialog = false },
+            title = { Text("Add Custom Language") },
+            text = {
+                Column {
+                    Text("Select a JSON file with syntax rules")
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = { addLanguageLauncher.launch(arrayOf("application/json")) }) {
+                        Text("Select JSON")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAddLanguageDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    // Remove language dialog
+    if (showRemoveLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoveLanguageDialog = false },
+            title = { Text("Remove Language") },
+            text = {
+                Column {
+                    languages.keys.filter { it !in listOf("kotlin","java","python","c") }.forEach { lang ->
+                        Button(onClick = {
+                            languages.remove(lang)
+                            File(context.filesDir, "$lang.json").delete()
+                            showRemoveLanguageDialog = false
+                            scope.launch { snackbarHostState.showSnackbar("🗑 Language '$lang' removed") }
+                        }) { Text(lang) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRemoveLanguageDialog = false }) { Text("Close") }
+            }
+        )
+    }
+}
+
+// ---------------- Parse JSON ----------------
+fun parseSyntaxJson(jsonString: String): Pair<String, SyntaxRules>? {
+    return try {
+        val obj = JSONObject(jsonString)
+        val name = obj.getString("name")
+        val keywords = obj.getJSONArray("keywords").let { arr -> List(arr.length()) { arr.getString(it) } }
+        val stringPattern = obj.getString("stringPattern").toRegex(RegexOption.DOT_MATCHES_ALL)
+        val commentPattern = obj.getString("commentPattern").toRegex(RegexOption.MULTILINE)
+        name to SyntaxRules(keywords, stringPattern, commentPattern)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }

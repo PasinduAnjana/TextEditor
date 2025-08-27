@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.example.texteditor.models.CompileError
 import com.example.texteditor.models.CompileResponse
 import com.example.texteditor.network.CompilerApi
+import com.example.texteditor.utils.AutoInsert
 import com.example.texteditor.utils.FileUtils.getFileName
 import com.example.texteditor.utils.FileUtils.readTextFromUri
 import com.example.texteditor.utils.FileUtils.writeTextToUri
@@ -69,8 +70,17 @@ fun TextEditorApp(initialSyntaxConfig: Map<String, SyntaxRules>) {
         if (!isUndoOrRedo && !isLoadingFile) {
             undoStack.add(codeTextState)
             redoStack.clear()
-            val newText = processAutoInsert(newValue.text, codeTextState.text)
-            codeTextState = TextFieldValue(text = newText, selection = newValue.selection)
+
+            val (processedText, newCursor) = AutoInsert.processAutoInsert(
+                newValue.text,
+                codeTextState.text,
+                newValue.selection.start
+            )
+
+            codeTextState = TextFieldValue(
+                text = processedText,
+                selection = TextRange(newCursor)
+            )
         } else {
             codeTextState = newValue
             isUndoOrRedo = false
@@ -81,7 +91,7 @@ fun TextEditorApp(initialSyntaxConfig: Map<String, SyntaxRules>) {
     @RequiresApi(Build.VERSION_CODES.N)
     fun undo() {
         if (undoStack.isNotEmpty()) {
-            val prev = undoStack.removeLast()
+            val prev = undoStack.removeAt(undoStack.lastIndex)
             redoStack.add(codeTextState)
             isUndoOrRedo = true
             codeTextState = prev
@@ -91,7 +101,7 @@ fun TextEditorApp(initialSyntaxConfig: Map<String, SyntaxRules>) {
     @RequiresApi(Build.VERSION_CODES.N)
     fun redo() {
         if (redoStack.isNotEmpty()) {
-            val next = redoStack.removeLast()
+            val next = redoStack.removeAt(redoStack.lastIndex)
             undoStack.add(codeTextState)
             isUndoOrRedo = true
             codeTextState = next

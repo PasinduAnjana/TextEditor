@@ -88,6 +88,8 @@ fun TextEditorApp(initialSyntaxConfig: Map<String, SyntaxRules>) {
         }
     }
 
+
+
     @RequiresApi(Build.VERSION_CODES.N)
     fun undo() {
         if (undoStack.isNotEmpty()) {
@@ -152,6 +154,21 @@ fun TextEditorApp(initialSyntaxConfig: Map<String, SyntaxRules>) {
         }
     }
 
+    LaunchedEffect(codeTextState.text, fileUri) {
+        snapshotFlow { codeTextState.text }
+            .collect { newText ->
+                if (fileUri != null) {
+                    // ⏳ wait for 1.5 seconds of inactivity
+                    kotlinx.coroutines.delay(1500)
+
+                    // Save latest content to file
+                    saveTextToFile(context, fileUri, newText)
+
+                    // ✅ Optional: Show confirmation in logs or snackbar
+                    println("Auto-saved: $fileName")
+                }
+            }
+    }
 
 
     // ---------------- File Launchers ----------------

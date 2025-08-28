@@ -13,6 +13,11 @@ import java.io.File
 class MainActivity : ComponentActivity() {
 
     private var syntaxConfig = mutableMapOf(
+        "txt" to SyntaxRules(
+            keywords = emptyList(), // No keywords for plain text
+            stringPattern = "".toRegex(), // No string highlighting
+            commentPattern = "".toRegex() // No comment highlighting
+        ),
         "kotlin" to SyntaxRules(
             keywords = listOf(
                 "fun", "val", "var", "if", "else", "for", "while", "class", "object",

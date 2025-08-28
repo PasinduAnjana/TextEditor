@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -441,7 +442,8 @@ fun TextEditorApp(initialSyntaxConfig: Map<String, SyntaxRules>) {
                             File(context.filesDir, "$lang.json").delete()
                             showRemoveLanguageDialog = false
                             scope.launch { snackbarHostState.showSnackbar("🗑 Language '$lang' removed") }
-                        }) { Text(lang) }
+                        }
+                        ) { Text("Remove $lang") }
                     }
                 }
             },
